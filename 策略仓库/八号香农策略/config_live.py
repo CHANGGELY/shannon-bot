@@ -41,7 +41,7 @@ strategy_config = Config(
     equity_asset="USDC",
     # 初始本金 (用于 ROI 统计；单位需与 equity_asset 一致)
     initial_capital=5000.0,
-    USE_REAL_TRADING=False,     # 环境配置: False=测试网 (默认), True=实盘 (Risk!)
+    USE_REAL_TRADING=os.getenv("USE_REAL_TRADING", "").lower() in ("true", "1", "yes"),     # 环境配置: False=测试网 (默认), True=实盘 (Risk!)
     # ====== 杠杆（合约保证金口径，非借贷）======
     nominal_leverage=NOMINAL_LEVERAGE,            # 名义杠杆 W（策略层）
     position_leverage=POSITION_LEVERAGE,          # 逐笔杠杆 Z（交易所 leverage）
