@@ -63,68 +63,63 @@ else:
     SECRET_KEY = os.getenv("TESTNET_SECRET_KEY") or os.getenv("BINANCE_SECRET_KEY")
     logger.info("🧪 正在初始化 [测试网] 环境...")
 
-# API 限速配置
-API_MAX_QPS = float(os.getenv("BINANCE_API_MAX_QPS", "2"))
+# API 限速配置 (动态权重)
+# 币安标准: 1分钟 2400 权重
+# 安全阈值: 2000 (留 400 给撤单等紧急操作)
+RATE_LIMIT_WEIGHT_MAX = 2400
+RATE_LIMIT_WEIGHT_SAFE = 2000
+
+# 全局限速状态
 _API_LOCK = threading.Lock()
-_LAST_API_TS = 0.0
+_current_weight_1m = 0      # 当前分钟已用权重
+_last_weight_update_ts = 0  # 上次更新时间
 
-# 基础 URL (根据环境切换)
-if USE_TESTNET:
-    # Demo Trading 期货端点
-    BASE_URL = "https://demo-fapi.binance.com"
-    WS_BASE_URL = "wss://fstream.binancefuture.com"
-    logger.info(f"   REST 端点: {BASE_URL}")
-else:
-    # 生产环境
-    BASE_URL = "https://fapi.binance.com"
-    WS_BASE_URL = "wss://fstream.binance.com"
-    logger.info("🔴 警告: 使用生产环境，请确保资金安全！")
-
-if not API_KEY or not SECRET_KEY:
-    logger.warning("❌ 未检测到有效的 API KEY！请检查环境变量设置 (REAL_... / TESTNET_... / BINANCE_...)")
-
-
-# ============================================================
-# 核心工具函数
-# ============================================================
-
-def 生成签名(参数: dict) -> str:
+def _更新权重状态(响应头: dict):
     """
-    对请求参数进行 HMAC SHA256 签名
+    从响应头解析 X-MBX-USED-WEIGHT-1M
     """
-    查询字符串 = urlencode(参数)
-    签名 = hmac.new(
-        SECRET_KEY.encode('utf-8'),
-        查询字符串.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-    return 签名
+    global _current_weight_1m, _last_weight_update_ts
+    
+    # 尝试读取: x-mbx-used-weight-1m (不区分大小写)
+    # requests 的 headers 是 case-insensitive 的
+    used_weight = 响应头.get('x-mbx-used-weight-1m')
+    
+    if used_weight:
+        with _API_LOCK:
+            try:
+                val = int(used_weight)
+                _current_weight_1m = val
+                _last_weight_update_ts = time.time()
+                
+                # Debug logging (每增加 100 打印一次，避免刷屏)
+                if val % 100 < 5: 
+                   # logger.debug(f"当前 API 权重: {val}/{RATE_LIMIT_WEIGHT_MAX}")
+                   pass
+            except ValueError:
+                pass
 
-
-def _限速等待():
+def _检查风控():
     """
-    API 限速控制
+    请求前检查: 如果权重过高，强制等待到下一分钟
     """
-    global _LAST_API_TS
+    global _current_weight_1m
+    
     with _API_LOCK:
-        当前时间 = time.time()
-        间隔 = 1.0 / API_MAX_QPS
-        距离上次 = 当前时间 - _LAST_API_TS
-        if 距离上次 < 间隔:
-            time.sleep(间隔 - 距离上次)
-        _LAST_API_TS = time.time()
-
+        if _current_weight_1m >= RATE_LIMIT_WEIGHT_SAFE:
+            logger.warning(f"⚠️ API 权重告急 ({_current_weight_1m}/{RATE_LIMIT_WEIGHT_MAX})，暂停请求等待重置...")
+            
+            # 简单策略: 睡 60 秒 (不够精确但绝对安全) -> 也可以计算距离下一分钟剩余秒数
+            # 币安的计数器是每分钟重置，但具体时刻不确定，通常是滚动或自然分？
+            # 官方文档: "1m" interval.
+            # 稳妥起见，sleep 30s 再试
+            time.sleep(30)
+            
+            # 醒来后归零猜测 (实际会通过下一次请求头校准)
+            _current_weight_1m = 0
 
 def _请求(方法: str, 端点: str, 参数: dict = None, 需要签名: bool = False, 重试次数: int = 3) -> dict:
     """
-    统一的 HTTP 请求封装
-    
-    :param 方法: GET, POST, DELETE
-    :param 端点: API 端点路径 (如 /fapi/v1/ticker/price)
-    :param 参数: 请求参数
-    :param 需要签名: 是否需要签名 (私有接口需要)
-    :param 重试次数: 失败重试次数
-    :return: JSON 响应
+    统一的 HTTP 请求封装 (集成动态风控)
     """
     if 参数 is None:
         参数 = {}
@@ -138,17 +133,23 @@ def _请求(方法: str, 端点: str, 参数: dict = None, 需要签名: bool = 
         参数['signature'] = 生成签名(参数)
     
     for 尝试 in range(重试次数):
+        # 1. 动态风控检查
+        _检查风控()
+        
         try:
-            _限速等待()
-            
             if 方法 == 'GET':
                 响应 = requests.get(URL, params=参数, headers=请求头, timeout=10)
             elif 方法 == 'POST':
                 响应 = requests.post(URL, params=参数, headers=请求头, timeout=10)
             elif 方法 == 'DELETE':
                 响应 = requests.delete(URL, params=参数, headers=请求头, timeout=10)
+            elif 方法 == 'PUT':
+                响应 = requests.put(URL, params=参数, headers=请求头, timeout=10)
             else:
                 raise ValueError(f"不支持的 HTTP 方法: {方法}")
+            
+            # 2. 更新风控权重
+            _更新权重状态(响应.headers)
             
             数据 = 响应.json()
             
@@ -158,6 +159,14 @@ def _请求(方法: str, 端点: str, 参数: dict = None, 需要签名: bool = 
                 错误码 = 数据.get('code', 响应.status_code)
                 错误信息 = 数据.get('msg', '未知错误')
                 
+                # 418 / 429: 必须停止!
+                if 响应.status_code in [418, 429]:
+                    retry_after = int(响应.headers.get('Retry-After', 60))
+                    logger.error(f"⛔️ 触发币安 API 限制 (HTTP {响应.status_code})! 暂停 {retry_after} 秒...")
+                    time.sleep(retry_after)
+                    # 抛出异常中断策略，不要重试了
+                    raise Exception(f"API Limit Reached: {错误信息}")
+
                 # 判断是否可重试
                 if 错误码 in [-1001, -1003, -1015]:  # 网络/限速错误
                     logger.warning(f"API 请求失败 ({尝试+1}/{重试次数}): [{错误码}] {错误信息}")
