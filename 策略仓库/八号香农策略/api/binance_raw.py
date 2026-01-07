@@ -32,10 +32,36 @@ load_dotenv(dotenv_path=环境文件路径)
 
 logger = logging.getLogger(__name__)
 
-# API 密钥
-API_KEY = os.getenv("BINANCE_API_KEY")
-SECRET_KEY = os.getenv("BINANCE_SECRET_KEY")
-USE_TESTNET = os.getenv("BINANCE_TESTNET", "false").lower() == "true"
+# ============================================================
+# 环境与密钥配置 (Dual Key Support)
+# ============================================================
+
+# 1. 确定运行模式
+# 优先读取 USE_REAL_TRADING (由 config_live.py 统一控制)
+# 缺省时检查 BINANCE_TESTNET
+_is_real_trading = os.getenv("USE_REAL_TRADING", "").lower() in ("true", "1", "yes")
+_is_testnet_env = os.getenv("BINANCE_TESTNET", "false").lower() == "true"
+
+if _is_real_trading:
+    USE_TESTNET = False
+elif _is_testnet_env:
+    USE_TESTNET = True
+else:
+    # 默认安全模式：测试网
+    USE_TESTNET = True
+
+# 2. 根据模式加载对应的 API Key
+# 逻辑：优先读取专用 Key (REAL_... / TESTNET_...)，读不到则回退到通用 Key (BINANCE_...)
+if not USE_TESTNET:
+    # --- 实盘模式 ---
+    API_KEY = os.getenv("REAL_API_KEY") or os.getenv("BINANCE_API_KEY")
+    SECRET_KEY = os.getenv("REAL_SECRET_KEY") or os.getenv("BINANCE_SECRET_KEY")
+    logger.info("🚀 正在初始化 [实盘] 环境...")
+else:
+    # --- 测试网模式 ---
+    API_KEY = os.getenv("TESTNET_API_KEY") or os.getenv("BINANCE_API_KEY")
+    SECRET_KEY = os.getenv("TESTNET_SECRET_KEY") or os.getenv("BINANCE_SECRET_KEY")
+    logger.info("🧪 正在初始化 [测试网] 环境...")
 
 # API 限速配置
 API_MAX_QPS = float(os.getenv("BINANCE_API_MAX_QPS", "2"))
@@ -47,9 +73,7 @@ if USE_TESTNET:
     # Demo Trading 期货端点
     BASE_URL = "https://demo-fapi.binance.com"
     WS_BASE_URL = "wss://fstream.binancefuture.com"
-    logger.info("🧪 已启用币安 Demo Trading 期货模式")
     logger.info(f"   REST 端点: {BASE_URL}")
-    logger.info(f"   WS 端点: {WS_BASE_URL}")
 else:
     # 生产环境
     BASE_URL = "https://fapi.binance.com"
@@ -57,7 +81,7 @@ else:
     logger.info("🔴 警告: 使用生产环境，请确保资金安全！")
 
 if not API_KEY or not SECRET_KEY:
-    logger.warning("未检测到 BINANCE_API_KEY 或 BINANCE_SECRET_KEY，API 功能将不可用。")
+    logger.warning("❌ 未检测到有效的 API KEY！请检查环境变量设置 (REAL_... / TESTNET_... / BINANCE_...)")
 
 
 # ============================================================
