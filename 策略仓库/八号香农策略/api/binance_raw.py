@@ -63,6 +63,23 @@ else:
     SECRET_KEY = os.getenv("TESTNET_SECRET_KEY") or os.getenv("BINANCE_SECRET_KEY")
     logger.info("🧪 正在初始化 [测试网] 环境...")
 
+# ============================================================
+# 基础 URL 配置 (根据环境切换)
+# ============================================================
+if USE_TESTNET:
+    # Demo Trading 期货端点
+    BASE_URL = "https://testnet.binancefuture.com"
+    WS_BASE_URL = "wss://stream.binancefuture.com"
+    logger.info(f"   REST 端点: {BASE_URL}")
+else:
+    # 生产环境
+    BASE_URL = "https://fapi.binance.com"
+    WS_BASE_URL = "wss://fstream.binance.com"
+    logger.info("🔴 警告: 使用生产环境，请确保资金安全！")
+
+if not API_KEY or not SECRET_KEY:
+    logger.warning("❌ 未检测到有效的 API KEY！请检查环境变量设置 (REAL_... / TESTNET_... / BINANCE_...)")
+
 # API 限速配置 (动态权重)
 # 币安标准: 1分钟 2400 权重
 # 安全阈值: 2000 (留 400 给撤单等紧急操作)
