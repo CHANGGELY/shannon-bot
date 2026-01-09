@@ -514,9 +514,31 @@ async def main():
             if not isinstance(msg, dict):
                 return
             
-            # 跳过非行情消息 (如订单更新、账户更新等)
+            # 跳过非行情消息 (Account Update 仍跳过，但 ORDER_TRADE_UPDATE 要处理)
             event_type = msg.get('e', '')
-            if event_type in ['ORDER_TRADE_UPDATE', 'ACCOUNT_UPDATE', 'listenKeyExpired']:
+            
+            if event_type == 'ORDER_TRADE_UPDATE':
+                # 处理订单成交回报
+                order_data = msg.get('o', {})
+                if order_data.get('x') == 'TRADE': # 只关心成交事件
+                    symbol = order_data.get('s')
+                    side = order_data.get('S')
+                    price = float(order_data.get('L', 0))
+                    qty = float(order_data.get('l', 0))
+                    realized_profit = float(order_data.get('rp', 0)) # 只有平仓才有 realized profit
+                    
+                    profit_msg = ""
+                    if realized_profit > 0:
+                        profit_msg = f" | 💰 盈利: {realized_profit:.4f} U"
+                    
+                    logger.info(f"⚡️ 订单成交: {side} {symbol} {qty} @ {price}{profit_msg}")
+                    
+                    # 如果是卖单，通常意味着网格套利成功，可以打印更显眼的提示
+                    if side == 'SELL' and realized_profit > 0:
+                        logger.info(f"🎉 网格套利成功! 落袋为安: {realized_profit:.4f} U")
+                return
+
+            if event_type in ['ACCOUNT_UPDATE', 'listenKeyExpired']:
                 # 这些是用户数据推送，不是行情，跳过
                 return
             
