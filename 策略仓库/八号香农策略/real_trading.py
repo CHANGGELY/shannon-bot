@@ -61,6 +61,7 @@ from 策略仓库.八号香农策略.api.ws_manager import BinanceWsManager
 from 策略仓库.八号香农策略.program.volatility import VolatilityEngine
 from 策略仓库.八号香农策略.program.cprp import CPRPEngine
 from 策略仓库.八号香农策略.program.leverage_model import resolve_leverage_spec, available_balance
+from supabase import create_client, Client
 
 # ============================================================
 # 用户配置区
@@ -103,6 +104,53 @@ class ShannonProphet:
         
         # 控制锁
         self._lock = asyncio.Lock()
+        
+        # Supabase 客户端
+        self.supabase: Client = None
+        self._init_supabase()
+
+    def _init_supabase(self):
+        """初始化 Supabase 客户端"""
+        try:
+            url = os.getenv("SUPABASE_URL")
+            key = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+            if url and key:
+                self.supabase = create_client(url, key)
+                logger.info("✅ Supabase 连接成功")
+            else:
+                logger.warning("⚠️ 未配置 Supabase URL/KEY，将无法上报数据")
+        except Exception as e:
+            logger.error(f"Supabase 初始化失败: {e}")
+
+    async def _log_to_supabase(self, regime, width):
+        """上报策略状态到 Supabase"""
+        if not self.supabase:
+            return
+            
+        try:
+            # 构造数据
+            data = {
+                "timestamp": datetime.now().isoformat(),
+                "symbol": self.symbol,
+                "price": self.current_price,
+                "equity": self.equity_cache, # 净值 (包含未实现盈亏)
+                "available": self.available_balance_cache,
+                "position": self.position_cache,
+                "regime": regime,
+                "grid_width": width,
+                "leverage_real": self.leverage_spec.position_leverage if self.leverage_spec else 0,
+                "roi": (self.equity_cache - INITIAL_CAPITAL) / INITIAL_CAPITAL if INITIAL_CAPITAL else 0
+            }
+            
+            # 异步写入 (使用 asyncio.to_thread 避免阻塞主循环)
+            # 目标表: strategy_logs (如果没有这个表需要用户创建)
+            await asyncio.to_thread(
+                lambda: self.supabase.table("strategy_logs").insert(data).execute()
+            )
+            # logger.info("☁️ 数据已上报 Supabase")
+        except Exception as e:
+            logger.warning(f"数据上报 Supabase 失败: {e}")
+
         
     async def initialize(self):
         """初始化"""
@@ -282,6 +330,9 @@ class ShannonProphet:
                 
                 # 3. 同步最新账户状态 (权益可能变化)
                 await self._sync_account()
+
+                # 3.1 上报数据到 Supabase (每分钟)
+                await self._log_to_supabase(regime, current_width_pct)
                 
                 # 4. 计算理想挂单
                 # 使用中心价 (P_center) 而非实时 P_market 以减少噪音跟踪

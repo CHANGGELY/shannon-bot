@@ -38,7 +38,7 @@ width_multiplier_spike = 1.5  # Spike 模式：网格放大 1.5x
 width_multiplier_crush = 0.8  # Crush 模式：网格收缩 0.8x
 
 # 💰 资金配置
-initial_capital = 1000.0    # 初始资金 (USDC)
+initial_capital = 83.9    # 初始资金 (USDC)
 
 # ====== 杠杆（合约保证金口径，非借贷）======
 # 口径定义：
@@ -55,7 +55,7 @@ initial_capital = 1000.0    # 初始资金 (USDC)
 #
 # 参数二选一：
 nominal_leverage = None     # 名义杠杆 W（策略层，范围 [1, 2)；例 W=1.90 -> 需要 Z=19）
-position_leverage = 3.0     # 逐笔杠杆 Z（交易所 leverage，范围 [1, ...]）
+position_leverage = 2.0     # 逐笔杠杆 Z（交易所 leverage，范围 [1, ...]）
 max_position_leverage = 125 # 逐笔杠杆上限（交易所限制；超出会报错）
 
 # 若填写 nominal_leverage，则自动换算出 Z（这里默认 target_ratio 固定 0.5）
