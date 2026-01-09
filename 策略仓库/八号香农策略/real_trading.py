@@ -108,6 +108,9 @@ class ShannonProphet:
         # Supabase 客户端
         self.supabase: Client = None
         self._init_supabase()
+        
+        # 缓存持仓均价 (用于计算盈亏)
+        self.entry_price_cache = 0.0
 
     def _init_supabase(self):
         """初始化 Supabase 客户端"""
@@ -241,6 +244,8 @@ class ShannonProphet:
                 self.equity_cache = mb 
                 self.available_balance_cache = ab
                 self.position_cache = pos_amt
+                if pos_entry > 0:
+                    self.entry_price_cache = pos_entry
                 
                 # 计算实盘收益率 (ROI) = (当前净值 - 初始本金) / 初始本金
                 # 这是最真实的战绩，无论你中间怎么折腾，都看最后剩多少钱 vs 投入多少钱
@@ -526,6 +531,13 @@ async def main():
                     price = float(order_data.get('L', 0))
                     qty = float(order_data.get('l', 0))
                     realized_profit = float(order_data.get('rp', 0)) # 只有平仓才有 realized profit
+                    
+                    # [新增] 本地计算盈亏逻辑 (兼容 Testnet 不返回 rp 的情况)
+                    # 只有卖单 (SELL) 且 API 返回的利润为 0 时才计算
+                    if side == 'SELL' and realized_profit <= 0 and trader.entry_price_cache > 0:
+                        # 粗略估算: (卖出价 - 持仓均价) * 数量
+                        # 注意: 这里用的是"当前持仓均价"，如果是减仓可能会有偏差，但作为参考足够了
+                        realized_profit = (price - trader.entry_price_cache) * qty
                     
                     profit_msg = ""
                     if realized_profit > 0:
