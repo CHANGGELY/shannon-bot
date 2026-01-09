@@ -91,6 +91,31 @@ _API_LOCK = threading.Lock()
 _current_weight_1m = 0      # 当前分钟已用权重
 _last_weight_update_ts = 0  # 上次更新时间
 
+# ============================================================
+# 签名生成
+# ============================================================
+def 生成签名(参数: dict) -> str:
+    """
+    使用 HMAC-SHA256 生成币安 API 签名
+    
+    Args:
+        参数: 请求参数字典
+    Returns:
+        签名字符串 (hex)
+    """
+    查询字符串 = urlencode(参数)
+    签名 = hmac.new(
+        SECRET_KEY.encode('utf-8'),
+        查询字符串.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return 签名
+
+# 全局限速状态
+_API_LOCK = threading.Lock()
+_current_weight_1m = 0      # 当前分钟已用权重
+_last_weight_update_ts = 0  # 上次更新时间
+
 def _更新权重状态(响应头: dict):
     """
     从响应头解析 X-MBX-USED-WEIGHT-1M
