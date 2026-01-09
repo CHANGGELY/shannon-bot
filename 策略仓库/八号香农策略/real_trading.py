@@ -197,8 +197,11 @@ class ShannonProphet:
         """预加载 K 线数据以初始化波动率"""
         try:
             now = datetime.now()
-            # 获取最近 1440 分钟数据 (满足 Long Window)
-            df = api.fetch_candle_data(self.symbol, now, interval='1m', limit=1440)
+            # 动态读取 Long Window 配置，只拉取必要数量的 K 线
+            需要条数 = getattr(self.config, 'vol_long_window', 1440)
+            logger.info(f"正在预加载 {需要条数} 条 K 线数据 (基于 vol_long_window 配置)...")
+            
+            df = api.fetch_candle_data(self.symbol, now, interval='1m', limit=需要条数)
             if df is not None and not df.empty:
                 prices = df['close'].values
                 for p in prices:
