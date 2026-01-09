@@ -10,6 +10,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime
+from collections import deque
 
 import argparse
 
@@ -63,6 +64,58 @@ from 策略仓库.八号香农策略.program.cprp import CPRPEngine
 from 策略仓库.八号香农策略.program.leverage_model import resolve_leverage_spec, available_balance
 from supabase import create_client, Client
 
+# ==========================================
+# 精准盈亏计算 (FIFO)
+# ==========================================
+class TradeMatcher:
+    def __init__(self):
+        # 买单队列: [(price, qty), ...]
+        self.buy_queue = deque()
+        self.total_cost = 0.0
+        self.total_qty = 0.0
+        
+    def add_buy(self, price, qty):
+        """记录买单"""
+        self.buy_queue.append({'price': price, 'qty': qty})
+        self.total_qty += qty
+        self.total_cost += price * qty
+        logger.info(f"➕ 记账: 买入 {qty:.4f} @ {price:.2f} (库存: {self.total_qty:.4f})")
+        
+    def process_sell(self, sell_price, sell_qty):
+        """处理卖单，计算精准利润 (FIFO)"""
+        remaining_sell_qty = sell_qty
+        total_profit = 0.0
+        matched_cost = 0.0
+        
+        # 1. 优先匹配队列中的买单
+        while remaining_sell_qty > 0 and self.buy_queue:
+            buy_order = self.buy_queue[0] # 查看队首
+            match_qty = min(remaining_sell_qty, buy_order['qty'])
+            
+            # 计算这部分的利润
+            profit = (sell_price - buy_order['price']) * match_qty
+            total_profit += profit
+            matched_cost += buy_order['price'] * match_qty
+            
+            # 更新状态
+            remaining_sell_qty -= match_qty
+            buy_order['qty'] -= match_qty
+            self.total_qty -= match_qty
+            self.total_cost -= (buy_order['price'] * match_qty)
+            
+            # 如果该买单耗尽，移除
+            if buy_order['qty'] <= 1e-8:
+                self.buy_queue.popleft()
+                
+        # 2. 如果队列空了还有剩余卖出的量 (说明是底仓或以前的库存)
+        # 使用当前持仓均价估算剩余部分
+        if remaining_sell_qty > 0:
+            logger.warning(f"⚠️ 库存不足全额匹配 (缺 {remaining_sell_qty:.4f})，剩余部分无法精准计算")
+            
+        logger.info(f"➖ 记账: 卖出 {sell_qty:.4f} @ {sell_price:.2f} | 匹配成本: {matched_cost:.2f} | 利润: {total_profit:.4f}")
+        return total_profit
+
+
 # ============================================================
 # 用户配置区
 # ============================================================
@@ -111,6 +164,9 @@ class ShannonProphet:
         
         # 缓存持仓均价 (用于计算盈亏)
         self.entry_price_cache = 0.0
+        
+        # 初始化交易匹配器 (精准盈亏计算)
+        self.trade_matcher = TradeMatcher()
 
     def _init_supabase(self):
         """初始化 Supabase 客户端"""
@@ -532,19 +588,14 @@ async def main():
                     qty = float(order_data.get('l', 0))
                     realized_profit = float(order_data.get('rp', 0)) # 只有平仓才有 realized profit
                     
-                    # [修正] 本地计算盈亏逻辑 - 使用网格宽度估算
-                    # 在网格交易中，卖出价 ≈ 买入价 + 一个网格宽度
-                    # 因此每笔卖出的利润 ≈ grid_width * price * qty
-                    if side == 'SELL' and realized_profit <= 0:
-                        # 获取当前网格宽度 (作为利润估算基准)
-                        try:
-                            vol_status = trader.vol_engine.get_market_status()
-                            grid_width = vol_status.get('final_width', 0.002)  # 默认 0.2%
-                            # 估算利润: 网格宽度 × 卖出价 × 数量
-                            realized_profit = grid_width * price * qty
-                        except:
-                            # 如果无法获取网格宽度，使用保守估算 0.2%
-                            realized_profit = 0.002 * price * qty
+                    # [精准] 本地 FIFO 盈亏计算
+                    # 优先记录买单，卖出时进行队列匹配
+                    if side == 'BUY':
+                        trader.trade_matcher.add_buy(price, qty)
+                    elif side == 'SELL':
+                        if realized_profit <= 0:
+                            # 即使 API 返回 0，我们也尝试用 FIFO 计算精准网格利润
+                            realized_profit = trader.trade_matcher.process_sell(price, qty)
                     
                     profit_msg = ""
                     if realized_profit > 0:
