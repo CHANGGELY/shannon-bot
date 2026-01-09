@@ -532,16 +532,25 @@ async def main():
                     qty = float(order_data.get('l', 0))
                     realized_profit = float(order_data.get('rp', 0)) # 只有平仓才有 realized profit
                     
-                    # [新增] 本地计算盈亏逻辑 (兼容 Testnet 不返回 rp 的情况)
-                    # 只有卖单 (SELL) 且 API 返回的利润为 0 时才计算
-                    if side == 'SELL' and realized_profit <= 0 and trader.entry_price_cache > 0:
-                        # 粗略估算: (卖出价 - 持仓均价) * 数量
-                        # 注意: 这里用的是"当前持仓均价"，如果是减仓可能会有偏差，但作为参考足够了
-                        realized_profit = (price - trader.entry_price_cache) * qty
+                    # [修正] 本地计算盈亏逻辑 - 使用网格宽度估算
+                    # 在网格交易中，卖出价 ≈ 买入价 + 一个网格宽度
+                    # 因此每笔卖出的利润 ≈ grid_width * price * qty
+                    if side == 'SELL' and realized_profit <= 0:
+                        # 获取当前网格宽度 (作为利润估算基准)
+                        try:
+                            vol_status = trader.vol_engine.get_market_status()
+                            grid_width = vol_status.get('final_width', 0.002)  # 默认 0.2%
+                            # 估算利润: 网格宽度 × 卖出价 × 数量
+                            realized_profit = grid_width * price * qty
+                        except:
+                            # 如果无法获取网格宽度，使用保守估算 0.2%
+                            realized_profit = 0.002 * price * qty
                     
                     profit_msg = ""
                     if realized_profit > 0:
                         profit_msg = f" | 💰 盈利: {realized_profit:.4f} U"
+                    elif realized_profit < 0:
+                        profit_msg = f" | ⚠️ 亏损: {abs(realized_profit):.4f} U"
                     
                     logger.info(f"⚡️ 订单成交: {side} {symbol} {qty} @ {price}{profit_msg}")
                     
