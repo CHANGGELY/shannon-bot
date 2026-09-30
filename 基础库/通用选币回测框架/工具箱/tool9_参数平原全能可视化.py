@@ -504,7 +504,18 @@ def render_generation_ui():
             status_text.text(f"正在生成 {len(param_range)} 个策略配置...")
 
             strategies = []
-            context = {"range": range, "True": True, "False": False}
+            # 安全加固：eval 属于任意代码执行，这里禁用全部内置函数（__builtins__ 置空），
+            # 仅通过白名单提供配置所需的名称；同时拒绝包含 dunder（__）的配置，
+            # 防止通过属性链（如 __class__.__mro__）逃逸执行任意代码
+            if "__" in strategy_str:
+                raise ValueError("策略配置中不允许包含 '__'（禁止内部属性访问）")
+            context = {
+                "__builtins__": {},
+                "range": range, "list": list, "tuple": tuple, "dict": dict, "set": set,
+                "int": int, "float": float, "str": str, "len": len, "round": round,
+                "abs": abs, "min": min, "max": max, "sum": sum,
+                "True": True, "False": False,
+            }
             for p in param_range:
                 current_str = strategy_str.replace("{param}", str(p))
                 strategy_dict = eval(current_str, context)
