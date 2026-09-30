@@ -51,14 +51,15 @@ def get_monthly_first_days(start_date_str: str) -> list[str]:
     return dates
 
 def download_file(url: str, dest_path: str, max_retries: int = 5):
-    """使用 requests 下载文件，支持禁用 SSL 校验和重试"""
+    """使用 requests 下载文件，支持失败重试（保持 TLS 证书校验开启）"""
     import time
-    
+
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f"开始下载 (尝试 {attempt}/{max_retries}): {url}")
-            # verify=False 彻底解决证书问题
-            with requests.get(url, stream=True, timeout=300, verify=False) as r:
+            # 安全加固：datasets.tardis.dev 为公网 HTTPS 服务，证书由公共 CA 签发，
+            # 保持 requests 默认的证书校验（verify=True），防止中间人攻击
+            with requests.get(url, stream=True, timeout=300) as r:
                 r.raise_for_status()
                 with open(dest_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=1024*1024):
@@ -190,7 +191,4 @@ def main():
             logger.info(f"[{completed_count}/{total} | {progress:.1%}] {res}")
 
 if __name__ == "__main__":
-    # 禁用警告
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     main()

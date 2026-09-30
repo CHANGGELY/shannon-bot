@@ -223,7 +223,8 @@ def _run_fill_trade(symbol: str, start_ms: int, end_ms: int) -> int:
         "--end-ms",
         str(int(end_ms)),
     ]
-    p = subprocess.run(cmd, check=False)
+    # 安全加固：列表参数 + 显式 shell=False，参数不经 shell 解析
+    p = subprocess.run(cmd, check=False, shell=False)
     return int(p.returncode or 0)
 
 

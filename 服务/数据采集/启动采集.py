@@ -340,6 +340,8 @@ class BinanceRecorder:
             return {}
         
         self.last_ip_check_time = now
+        # 注意：ip-api.com 免费版仅支持 HTTP（HTTPS 为付费功能，实测 SSL 握手失败），无法改为 https。
+        # 该请求不携带任何敏感数据，响应仅用于出口 IP 的地域诊断，明文风险可接受。
         url = "http://ip-api.com/json/?fields=status,message,countryCode,query"
         
         def _fetch_blocking():
@@ -578,7 +580,8 @@ class BinanceRecorder:
             cmd.append("--delete-source")
 
         def _run_blocking():
-            return subprocess.run(cmd, check=False)
+            # 安全加固：列表参数 + 显式 shell=False，参数不经 shell 解析
+            return subprocess.run(cmd, check=False, shell=False)
 
         await asyncio.get_running_loop().run_in_executor(None, _run_blocking)
 
@@ -603,7 +606,8 @@ class BinanceRecorder:
         ]
 
         def _run_blocking():
-            return subprocess.run(cmd, check=False)
+            # 安全加固：列表参数 + 显式 shell=False，参数不经 shell 解析
+            return subprocess.run(cmd, check=False, shell=False)
 
         await asyncio.get_running_loop().run_in_executor(None, _run_blocking)
 

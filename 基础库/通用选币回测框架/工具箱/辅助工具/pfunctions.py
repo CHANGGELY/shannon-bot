@@ -13,6 +13,7 @@ Author: 邢不行
 
 import math
 import platform
+import subprocess
 import webbrowser
 import os
 from pathlib import Path
@@ -72,12 +73,14 @@ def show_without_plot_native_show(fig, save_path: str | Path):
     跨平台在默认浏览器中打开 URL 或文件
     """
     system_name = platform.system()  # 检测操作系统
+    # 安全加固：os.system 会经 shell 解析，save_path 存在命令注入风险，改用列表参数（shell=False）
     if system_name == "Darwin":  # macOS
-        os.system(f'open "" "{save_path}"')
+        subprocess.run(["open", str(save_path)], check=False)
     elif system_name == "Windows":  # Windows
-        os.system(f'start "" "{save_path}"')
+        # start 是 cmd 内建命令，无法用列表参数调用，os.startfile 等价且不经 shell
+        os.startfile(str(save_path))
     elif system_name == "Linux":  # Linux
-        os.system(f'xdg-open "" "{save_path}"')
+        subprocess.run(["xdg-open", str(save_path)], check=False)
     else:
         # 如果不确定操作系统，尝试使用 webbrowser 模块
         webbrowser.open(save_path)

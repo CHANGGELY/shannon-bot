@@ -5,6 +5,7 @@ startup.py
 import gc
 import os.path
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -172,7 +173,11 @@ def run_by_account(account: AccountConfig, run_time: datetime):
 def run_statistics(run_time):
     print('-' * 36, '开始统计', '-' * 36)
     python_exec = sys.executable  # 获取当前环境下的python解释器，也是给统计脚本用的
-    os.system(f'{python_exec} {get_file_path("core", "utils", "statistics.py")} {int(run_time.timestamp())}')
+    # 安全加固：os.system 走 shell 解析存在命令注入风险，改用列表参数 + subprocess（shell=False）
+    subprocess.run(
+        [python_exec, str(get_file_path("core", "utils", "statistics.py")), str(int(run_time.timestamp()))],
+        check=False,
+    )
     print('✅统计运行结束\n')
 
 
