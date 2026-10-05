@@ -22,6 +22,10 @@ COPY . .
 RUN chmod +x deployment_hf/zeabur_entrypoint.sh
 RUN mv deployment_hf/zeabur_entrypoint.sh ./entrypoint.sh
 
+# 创建非 root 用户并移交 /app 所有权（安全加固：避免容器以 root 运行）
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # 暴露端口
 EXPOSE 8080
 
